@@ -1,0 +1,14 @@
+{
+    "package": "anki_image_organizer_pro",
+    "name": "Image Organizer Pro",
+    "mod": 1641024000,
+    "author": "Anki Image Organizer Team",
+    "version": "3.0.0",
+    "homepage": "https://github.com/bugsbunny8/anki-image-organizer",
+    "conflicts": [],
+    "min_point_version": 45,
+    "max_point_version": 50,
+    "description": "专业的Anki图片整理插件，支持范围选择、格式转换和分辨率调整",
+    "tags": ["image", "media", "optimization", "compression", "organization"],
+    "license": "MIT"
+}

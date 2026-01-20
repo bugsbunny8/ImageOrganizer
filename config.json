@@ -1,0 +1,31 @@
+{
+  "default_naming_pattern": "hash",
+  "default_file_pattern": "img_{hash}{ext}",
+  "target_format": "jpg",
+  "auto_backup": true,
+  "backup_folder": "anki_image_backups",
+  "optimization_strategy": "balanced",
+  "preserve_metadata": false,
+  "skip_locked_cards": true,
+  "batch_size": 100,
+  "max_cards_to_process": 10000,
+  "timeout_seconds": 300,
+  "scan_scope": {
+    "default_scope": "selected_cards",
+    "include_subdecks": true,
+    "recent_searches": [],
+    "recent_decks": []
+  },
+  "compression": {
+    "jpg_quality": 85,
+    "enable_lossy_compression": true,
+    "min_compression_ratio": 0.9
+  },
+  "resolution": {
+    "default_preset": "laptop",
+    "max_width": 3840,
+    "max_height": 2160,
+    "keep_aspect_ratio": true,
+    "resize_mode": "contain"
+  }
+}
