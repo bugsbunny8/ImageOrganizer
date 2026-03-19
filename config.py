@@ -23,7 +23,11 @@ class CompressionConfig:
     # 目标格式优先级
     format_priority: List[str] = field(default_factory=lambda: [
         'jpg', 'webp', 'png'
-    ])
+    ]
+    )
+
+    # 最小处理文件大小（KB），只有大于等于此值的文件才会被处理
+    min_file_size_kb: int = 1024
 
 @dataclass
 class ResolutionConfig:
@@ -188,6 +192,7 @@ class PluginConfig:
                 "jpg_quality": self.compression.jpg_quality,
                 "enable_lossy_compression": self.compression.enable_lossy_compression,
                 "min_compression_ratio": self.compression.min_compression_ratio,
+                "min_file_size_kb": self.compression.min_file_size_kb,
             },
             "resolution": {
                 "default_preset": self.resolution.default_preset,
@@ -244,6 +249,8 @@ class PluginConfig:
                     "enable_lossy_compression", config.compression.enable_lossy_compression)
                 config.compression.min_compression_ratio = compression_data.get(
                     "min_compression_ratio", config.compression.min_compression_ratio)
+                config.compression.min_file_size_kb = compression_data.get(
+                    "min_file_size_kb", config.compression.min_file_size_kb)
             
             # 分辨率配置
             resolution_data = data.get("resolution", {})

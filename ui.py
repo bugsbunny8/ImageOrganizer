@@ -24,13 +24,48 @@ try:
 except ImportError:
     HAS_PIL = False
 
+class EstimateThread(QThread):
+    finished_signal = pyqtSignal(dict)
+    error_signal = pyqtSignal(str)
+    
+    def __init__(self, scanner, scan_scope, parent=None):
+        super().__init__(parent)
+        self.scanner = scanner
+        self.scan_scope = scan_scope
+        
+    def run(self):
+        try:
+            estimate = self.scanner.estimate_scope_size(self.scan_scope)
+            self.finished_signal.emit(estimate)
+        except Exception as e:
+            self.error_signal.emit(str(e))
+
+class ScanThread(QThread):
+    finished_signal = pyqtSignal(list, dict)
+    error_signal = pyqtSignal(str)
+    
+    def __init__(self, scanner, scan_scope, parent=None):
+        super().__init__(parent)
+        self.scanner = scanner
+        self.scan_scope = scan_scope
+        
+    def run(self):
+        try:
+            cards = self.scanner.scan_scope(self.scan_scope)
+            stats = self.scanner.get_statistics(cards)
+            self.finished_signal.emit(cards, stats)
+        except Exception as e:
+            self.error_signal.emit(str(e))
+
+
 class DeckSelectionDialog(QDialog):
     """牌组选择对话框"""
     
-    def __init__(self, deck_list: List[Dict], selected_decks: Set[int] = None, parent=None):
+    def __init__(self, deck_list: List[Dict], selected_decks: Set[int] = None, include_subdecks: bool = False, parent=None):
         super().__init__(parent)
         self.deck_list = deck_list
         self.selected_decks = selected_decks or set()
+        self.include_subdecks = include_subdecks
         self.init_ui()
         self.resize(500, 600)
     
@@ -48,6 +83,12 @@ class DeckSelectionDialog(QDialog):
         self.search_edit.textChanged.connect(self.filter_decks)
         search_layout.addWidget(search_label)
         search_layout.addWidget(self.search_edit)
+        
+        # 包含子牌组复选框（布局到搜索框最右边）
+        self.include_subdecks_check = QCheckBox("包含子牌组")
+        self.include_subdecks_check.setChecked(self.include_subdecks)
+        search_layout.addWidget(self.include_subdecks_check)
+        
         layout.addLayout(search_layout)
         
         # 牌组树
@@ -84,6 +125,9 @@ class DeckSelectionDialog(QDialog):
         
         # 加载牌组
         self.load_decks()
+        
+        # 连接项目状态改变信号
+        self.deck_tree.itemChanged.connect(self.on_item_changed)
     
     def load_decks(self):
         """加载牌组到树中"""
@@ -119,6 +163,16 @@ class DeckSelectionDialog(QDialog):
         
         # 展开所有节点
         self.deck_tree.expandAll()
+    
+    def on_item_changed(self, item: QTreeWidgetItem, column: int):
+        """处理树节点状态改变"""
+        if getattr(self, '_updating_items', False) or not self.include_subdecks_check.isChecked():
+            return
+            
+        checked = item.checkState(0) == Qt.CheckState.Checked
+        for i in range(item.childCount()):
+            child = item.child(i)
+            self._set_item_checked(child, checked)
     
     def filter_decks(self, text: str):
         """过滤牌组"""
@@ -159,12 +213,17 @@ class DeckSelectionDialog(QDialog):
     
     def _set_item_checked(self, item: QTreeWidgetItem, checked: bool):
         """设置项目选择状态"""
-        item.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
-        
-        # 递归设置子项目
-        for i in range(item.childCount()):
-            child = item.child(i)
-            self._set_item_checked(child, checked)
+        was_updating = getattr(self, '_updating_items', False)
+        self._updating_items = True
+        try:
+            item.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+            
+            # 递归设置子项目
+            for i in range(item.childCount()):
+                child = item.child(i)
+                self._set_item_checked(child, checked)
+        finally:
+            self._updating_items = was_updating
     
     def get_selected_decks(self) -> Set[int]:
         """获取选中的牌组ID"""
@@ -308,7 +367,34 @@ class OptimizationOptionsDialog(QDialog):
         
         resolution_group.setLayout(resolution_layout)
         layout.addWidget(resolution_group)
+
+        # 文件大小限制选项
+        size_group = QGroupBox("文件大小限制")
+        size_layout = QVBoxLayout()
         
+        self.enable_size_limit_check = QCheckBox("启用文件大小限制（仅处理大于阈值的图片）")
+        self.enable_size_limit_check.setChecked(self.config.compression.min_file_size_kb > 0)
+        size_layout.addWidget(self.enable_size_limit_check)
+        
+        size_limit_layout = QHBoxLayout()
+        size_limit_layout.addWidget(QLabel("最小处理大小:"))
+        self.min_size_spin = QSpinBox()
+        self.min_size_spin.setRange(0, 102400)  # 0-100MB
+        self.min_size_spin.setValue(self.config.compression.min_file_size_kb)
+        self.min_size_spin.setSuffix(" KB")
+        self.min_size_spin.setEnabled(self.config.compression.min_file_size_kb > 0)
+        size_limit_layout.addWidget(self.min_size_spin)
+        
+        self.enable_size_limit_check.toggled.connect(
+            lambda checked: self.min_size_spin.setEnabled(checked)
+        )
+        
+        size_limit_layout.addStretch()
+        size_layout.addLayout(size_limit_layout)
+        
+        size_group.setLayout(size_layout)
+        layout.addWidget(size_group)
+
         # 按钮
         button_layout = QHBoxLayout()
         self.save_button = QPushButton("保存")
@@ -348,6 +434,9 @@ class OptimizationOptionsDialog(QDialog):
         else:
             resize_mode = "fill"
         
+        # 文件大小限制
+        min_file_size_kb = self.min_size_spin.value() if self.enable_size_limit_check.isChecked() else 0
+
         return {
             'enable_conversion': self.enable_conversion_check.isChecked(),
             'target_format': target_format,
@@ -357,7 +446,8 @@ class OptimizationOptionsDialog(QDialog):
             'resolution_preset': preset_name,
             'resolution': resolution,
             'resize_mode': resize_mode,
-            'keep_aspect_ratio': self.keep_aspect_check.isChecked()
+            'keep_aspect_ratio': self.keep_aspect_check.isChecked(),
+            'min_file_size_kb': min_file_size_kb
         }
 
 
@@ -408,13 +498,11 @@ class ScanScopeWidget(QWidget):
         self.deck_count_label = QLabel("(未选择)")
         decks_layout.addWidget(self.deck_count_label)
         
+        # 内部状态变量代替界面复选框
+        self.include_subdecks = self.config.scan_scope.include_subdecks
+        
         decks_layout.addStretch()
         layout.addLayout(decks_layout)
-        
-        # 包含子牌组
-        self.include_subdecks_check = QCheckBox("包含子牌组")
-        self.include_subdecks_check.setChecked(self.config.scan_scope.include_subdecks)
-        layout.addWidget(self.include_subdecks_check)
         
         # 选中卡片
         self.selected_cards_radio = QRadioButton("选中卡片（从卡片浏览器）")
@@ -453,15 +541,6 @@ class ScanScopeWidget(QWidget):
         templates_layout.addStretch()
         layout.addLayout(templates_layout)
         
-        # 范围大小预估
-        self.estimate_button = QPushButton("预估范围大小")
-        self.estimate_button.clicked.connect(self.estimate_scope)
-        layout.addWidget(self.estimate_button)
-        
-        self.estimate_label = QLabel("")
-        self.estimate_label.setWordWrap(True)
-        layout.addWidget(self.estimate_label)
-        
         self.setLayout(layout)
         
         # 更新UI状态
@@ -481,7 +560,6 @@ class ScanScopeWidget(QWidget):
         
         self.deck_select_button.setEnabled(is_selected_decks)
         self.deck_count_label.setEnabled(is_selected_decks)
-        self.include_subdecks_check.setEnabled(is_selected_decks or current_scope == "current_deck")
         self.search_edit.setEnabled(is_custom_search)
         self.search_template_combo.setEnabled(is_custom_search)
         
@@ -520,9 +598,10 @@ class ScanScopeWidget(QWidget):
             return
         
         # 显示选择对话框
-        dialog = DeckSelectionDialog(deck_list, self.selected_decks, self)
+        dialog = DeckSelectionDialog(deck_list, self.selected_decks, self.include_subdecks, self)
         if dialog.exec():
             self.selected_decks = dialog.get_selected_decks()
+            self.include_subdecks = dialog.include_subdecks_check.isChecked()
             self.update_ui_state()
     
     def on_template_selected(self, index):
@@ -533,29 +612,7 @@ class ScanScopeWidget(QWidget):
             self.custom_search_radio.setChecked(True)
             self.update_ui_state()
     
-    def estimate_scope(self):
-        """预估范围大小"""
-        try:
-            scope = self.get_scan_scope()
-            estimate = self.scanner.estimate_scope_size(scope)
-            
-            if estimate['card_count'] == 0:
-                self.estimate_label.setText("⚠️ 未找到符合条件的卡片")
-                return
-            
-            estimate_text = (
-                f"<b>预估范围大小:</b><br>"
-                f"• 卡片数量: <b>{estimate['card_count']} 张</b><br>"
-                f"• 预估图片数: <b>{estimate['estimated_images']} 个</b><br>"
-                f"• 预估处理时间: <b>{estimate['estimated_time_minutes']} 分钟</b><br>"
-                f"• 基于 {estimate['sample_size']} 张卡片的样本估算"
-            )
-            
-            self.estimate_label.setText(estimate_text)
-            
-        except Exception as e:
-            showWarning(f"预估范围大小时出错: {str(e)}")
-    
+
     def get_scan_scope(self) -> ScanScope:
         """获取扫描范围配置"""
         scope_type = self.get_scope_type()
@@ -569,14 +626,14 @@ class ScanScopeWidget(QWidget):
         elif scope_type == "current_deck":
             return ScanScope(
                 scope_type="current_deck",
-                include_subdecks=self.include_subdecks_check.isChecked()
+                include_subdecks=self.include_subdecks
             )
         
         elif scope_type == "selected_decks":
             return ScanScope(
                 scope_type="selected_decks",
                 deck_ids=list(self.selected_decks),
-                include_subdecks=self.include_subdecks_check.isChecked()
+                include_subdecks=self.include_subdecks
             )
         
         elif scope_type == "selected_cards":
@@ -609,7 +666,7 @@ class ScanScopeWidget(QWidget):
         """更新配置"""
         scope_type = self.get_scope_type()
         self.config.scan_scope.default_scope = scope_type
-        self.config.scan_scope.include_subdecks = self.include_subdecks_check.isChecked()
+        self.config.scan_scope.include_subdecks = self.include_subdecks
 
 
 class ImageOrganizerDialog(QDialog):
@@ -627,7 +684,22 @@ class ImageOrganizerDialog(QDialog):
         self.optimization_options = {}
         
         self.init_ui()
-        self.resize(1200, 600)
+        
+        # 能够自适应桌面大小
+        screen = self.screen()
+        if screen:
+            geom = screen.availableGeometry()
+            # 设为屏幕的 80%，但保证至少有 1000x600 的大小，同时不超过屏幕尺寸
+            width = min(geom.width(), max(1000, int(geom.width() * 0.8)))
+            height = min(geom.height(), max(600, int(geom.height() * 0.8)))
+            self.resize(width, height)
+            
+            # 居中显示
+            x = (geom.width() - width) // 2
+            y = (geom.height() - height) // 2
+            self.move(geom.x() + x, geom.y() + y)
+        else:
+            self.resize(1200, 600)
     
     def init_ui(self):
         """初始化UI"""
@@ -651,6 +723,11 @@ class ImageOrganizerDialog(QDialog):
         
         # 扫描按钮
         scan_layout = QHBoxLayout()
+        
+        self.estimate_button = QPushButton("预估范围大小")
+        self.estimate_button.clicked.connect(self.estimate_scope)
+        scan_layout.addWidget(self.estimate_button)
+        
         self.scan_button = QPushButton("开始扫描")
         self.scan_button.clicked.connect(self.scan_cards)
         scan_layout.addWidget(self.scan_button)
@@ -661,28 +738,16 @@ class ImageOrganizerDialog(QDialog):
         
         left_layout.addLayout(scan_layout)
         
-        # 统计信息（使用滚动区域）
+        # 统计信息
         stats_group = QGroupBox("扫描结果统计")
         stats_layout = QVBoxLayout()
         
-        # 创建滚动区域
-        stats_scroll = QScrollArea()
-        stats_scroll.setWidgetResizable(True)
-        stats_scroll.setMinimumHeight(200)
+        self.stats_label = QTextBrowser()
+        self.stats_label.setOpenExternalLinks(True)
+        self.stats_label.setHtml("等待扫描...")
+        self.stats_label.setMinimumHeight(200)
         
-        # 创建统计信息容器
-        stats_container = QWidget()
-        stats_container_layout = QVBoxLayout()
-        
-        self.stats_label = QLabel("等待扫描...")
-        self.stats_label.setWordWrap(True)
-        self.stats_label.setTextFormat(Qt.TextFormat.RichText)
-        stats_container_layout.addWidget(self.stats_label)
-        
-        stats_container.setLayout(stats_container_layout)
-        stats_scroll.setWidget(stats_container)
-        
-        stats_layout.addWidget(stats_scroll)
+        stats_layout.addWidget(self.stats_label)
         stats_group.setLayout(stats_layout)
         left_layout.addWidget(stats_group)
         
@@ -803,6 +868,12 @@ class ImageOrganizerDialog(QDialog):
             self.on_optimization_changed
         )
         row2_option_layout.addWidget(self.enable_optimization_check)
+        
+        # 显示不符条件项
+        self.show_unqualified_check = QCheckBox("显示不符条件项")
+        self.show_unqualified_check.setChecked(False)
+        self.show_unqualified_check.stateChanged.connect(self.on_show_unqualified_changed)
+        row2_option_layout.addWidget(self.show_unqualified_check)
 
         row2_option_layout.addStretch()
         options_layout.addLayout(row2_option_layout)
@@ -893,6 +964,43 @@ class ImageOrganizerDialog(QDialog):
             options = dialog.get_options()
             self.optimization_options = options
     
+    def estimate_scope(self):
+        """预估范围大小（后台线程）"""
+        try:
+            scope = self.scope_widget.get_scan_scope()
+            self.estimate_button.setEnabled(False)
+            self.stats_label.setHtml("⏱️ 正在预估范围大小，请稍候...")
+            
+            self.estimate_thread = EstimateThread(self.scanner, scope, self)
+            self.estimate_thread.finished_signal.connect(self._on_estimate_finished)
+            self.estimate_thread.error_signal.connect(self._on_estimate_error)
+            self.estimate_thread.start()
+            
+        except Exception as e:
+            self.estimate_button.setEnabled(True)
+            showWarning(f"准备预估时出错: {str(e)}")
+
+    def _on_estimate_finished(self, estimate):
+        self.estimate_button.setEnabled(True)
+        if estimate['card_count'] == 0:
+            self.stats_label.setHtml("⚠️ 未找到符合条件的卡片")
+            return
+        
+        estimate_text = (
+            f"<b>预估范围大小:</b><br>"
+            f"• 卡片数量: <b>{estimate['card_count']} 张</b><br>"
+            f"• 预估图片数: <b>{estimate['estimated_images']} 个</b><br>"
+            f"• 预估处理时间: <b>{estimate['estimated_time_minutes']} 分钟</b><br>"
+            f"• 基于 {estimate['sample_size']} 张卡片的样本估算"
+        )
+        
+        self.stats_label.setHtml(estimate_text)
+
+    def _on_estimate_error(self, error_msg):
+        self.estimate_button.setEnabled(True)
+        self.stats_label.setHtml(f"预估失败: {error_msg}")
+        showWarning(f"预估范围大小时出错: {error_msg}")
+
     def scan_cards(self):
         """扫描卡片"""
         # 更新配置
@@ -941,53 +1049,56 @@ class ImageOrganizerDialog(QDialog):
         self.scan_progress.setRange(0, 0)  # 不确定模式
         
         # 异步扫描
-        QTimer.singleShot(100, self.perform_scan)
+        self.perform_scan()
     
     def perform_scan(self):
-        """执行扫描"""
-        try:
-            # 使用范围扫描
-            self.cards = self.scanner.scan_scope(self.scan_scope)
-            self.scanned = True
-            
-            # 更新统计信息
-            stats = self.scanner.get_statistics(self.cards)
-            
-            # 格式化统计信息
-            stats_text = self.format_stats_text(stats)
-            self.stats_label.setText(stats_text)
-            
-            # 显示牌组统计
-            if stats['deck_stats']:
-                deck_text = self.format_deck_stats_text(stats['deck_stats'])
-                self.deck_stats_label.setText(deck_text)
-                
-                # 显示牌组统计组
-                deck_stats_group = self.findChild(QGroupBox, "牌组统计")
-                if deck_stats_group:
-                    deck_stats_group.setVisible(True)
-            
-            # 更新表格（包含预估信息）
-            self.update_results_table_with_estimates(stats)
-            
-            # 启用处理按钮
-            has_images = len(self.cards) > 0
-            self.process_button.setEnabled(has_images)
-            self.export_button.setEnabled(has_images)
-            self.optimize_button.setEnabled(has_images and self.enable_optimization_check.isChecked())
-            
-            # 显示提示
-            if has_images:
-                tooltip(f"扫描完成，找到 {stats['total_cards']} 张包含图片的卡片")
-            else:
-                tooltip("扫描完成，未找到包含图片的卡片")
-            
-        except Exception as e:
-            showWarning(f"扫描时出错: {str(e)}")
+        """执行扫描（启动后台线程）"""
+        self.stats_label.setHtml("⏱️ 正在扫描卡片并统信息，过程可能需要一些时间，请耐心等待...")
+        self.scan_thread = ScanThread(self.scanner, self.scan_scope, self)
+        self.scan_thread.finished_signal.connect(self._on_scan_finished)
+        self.scan_thread.error_signal.connect(self._on_scan_error)
+        self.scan_thread.start()
         
-        finally:
-            self.scan_button.setEnabled(True)
-            self.scan_progress.setVisible(False)
+    def _on_scan_finished(self, cards, stats):
+        self.scan_button.setEnabled(True)
+        self.scan_progress.setVisible(False)
+        self.cards = cards
+        self.scanned = True
+        
+        # 格式化统计信息
+        stats_text = self.format_stats_text(stats)
+        self.stats_label.setHtml(stats_text)
+        
+        # 显示牌组统计
+        if stats['deck_stats']:
+            deck_text = self.format_deck_stats_text(stats['deck_stats'])
+            self.deck_stats_label.setText(deck_text)
+            
+            # 显示牌组统计组
+            deck_stats_group = self.findChild(QGroupBox, "牌组统计")
+            if deck_stats_group:
+                deck_stats_group.setVisible(True)
+        
+        # 更新表格（包含预估信息）
+        self.update_results_table_with_estimates(stats)
+        
+        # 启用处理按钮
+        has_images = len(self.cards) > 0
+        self.process_button.setEnabled(has_images)
+        self.export_button.setEnabled(has_images)
+        self.optimize_button.setEnabled(has_images and self.enable_optimization_check.isChecked())
+        
+        # 显示提示
+        if has_images:
+            tooltip(f"扫描完成，找到 {stats['total_cards']} 张包含图片的卡片")
+        else:
+            tooltip("扫描完成，未找到包含图片的卡片")
+            
+    def _on_scan_error(self, error_msg):
+        self.scan_button.setEnabled(True)
+        self.scan_progress.setVisible(False)
+        self.stats_label.setHtml(f"扫描失败: {error_msg}")
+        showWarning(f"扫描时出错: {error_msg}")
     
     def format_stats_text(self, stats: Dict) -> str:
         """格式化统计信息文本"""
@@ -1081,18 +1192,53 @@ class ImageOrganizerDialog(QDialog):
         
         return f"{size_bytes:.1f} TB"
     
-    def update_results_table_with_estimates(self, stats: Dict):
+    def on_show_unqualified_changed(self, state):
+        """显示不符条件项 状态改变"""
+        if hasattr(self, 'scanned') and self.scanned:
+            self.update_results_table_with_estimates(None)
+            
+    def update_results_table_with_estimates(self, stats: Dict = None):
         """更新结果表格（包含预估信息）"""
+        self.results_table.setUpdatesEnabled(False)
+        self.results_table.setSortingEnabled(False)
         self.results_table.setRowCount(0)
+        
+        show_unqualified = getattr(self, 'show_unqualified_check', None)
+        show_unqualified = show_unqualified.isChecked() if show_unqualified else False
+        min_size_bytes = self.config.compression.min_file_size_kb * 1024  # 当前配置的阈值
+        
+        # 收集图片引用（过滤不符条件的）
+        all_image_refs = []
+        for card in self.cards:
+            for image_ref in card['images']:
+                is_qualified = True
+                if not image_ref.file_exists:
+                    is_qualified = False
+                elif min_size_bytes > 0 and image_ref.file_size < min_size_bytes:
+                    is_qualified = False
+                    
+                if show_unqualified or is_qualified:
+                    all_image_refs.append((card, image_ref))
+                
+        total_images = len(all_image_refs)
+        MAX_ROWS = 1000
+        
+        # 超过限制时提取前500和后500
+        if total_images > MAX_ROWS:
+            display_refs = all_image_refs[:500] + all_image_refs[-500:]
+        else:
+            display_refs = all_image_refs
+            
+        display_count = len(display_refs)
+        
+        # 一次性分配行，避免增量分配带来的开销
+        self.results_table.setRowCount(display_count)
         
         row = 0
         naming_pattern = self.naming_combo.currentData()
         
-        for card in self.cards:
-            for image_ref in card['images']:
-                self.results_table.insertRow(row)
-                
-                # 卡片ID
+        for card, image_ref in display_refs:
+            # 卡片ID
                 card_id_item = QTableWidgetItem(str(image_ref.card_id))
                 self.results_table.setItem(row, 0, card_id_item)
                 
@@ -1135,16 +1281,19 @@ class ImageOrganizerDialog(QDialog):
                     self.results_table.setItem(row, 5, savings_item)
                 
                 # 状态
-                if image_ref.file_exists:
-                    if image_ref.file_size > 1024 * 1024 * 5:  # 大于5MB
-                        status = "⚠️ 大文件"
-                        color = QColor(255, 165, 0)  # 橙色
-                    else:
-                        status = "✅ 正常"
-                        color = QColor(0, 128, 0)  # 绿色
-                else:
+                if not image_ref.file_exists:
                     status = "❌ 缺失"
                     color = QColor(255, 0, 0)  # 红色
+                elif min_size_bytes > 0 and image_ref.file_size < min_size_bytes:
+                    # 文件大小小于阈值，将不会被处理
+                    status = "⏭️ 小于阈值"
+                    color = QColor(128, 128, 128)  # 灰色
+                elif image_ref.file_size > 1024 * 1024 * 5:  # 大于5MB
+                    status = "⚠️ 大文件"
+                    color = QColor(255, 165, 0)  # 橙色
+                else:
+                    status = "✅ 正常"
+                    color = QColor(0, 128, 0)  # 绿色
                 
                 status_item = QTableWidgetItem(status)
                 status_item.setForeground(color)
@@ -1160,7 +1309,19 @@ class ImageOrganizerDialog(QDialog):
                 
                 row += 1
         
-        self.results_table.resizeColumnsToContents()
+        # 恢复表格更新和排序
+        self.results_table.setUpdatesEnabled(True)
+        self.results_table.setSortingEnabled(True)
+        
+        # 视情况调整列宽，如果超过最大行数会有明显卡死，干脆不在大容量时全表 resize
+        if total_images <= 500:
+            self.results_table.resizeColumnsToContents()
+            
+        # 超出截断提示
+        if total_images > MAX_ROWS:
+            current_html = self.stats_label.toHtml()
+            trunc_msg = f"<br><br><b style='color:orange;'>⚠️ 提示：为了防止界面卡死，上方结果表格仅展示了前 500 张和后 500 张（共 {MAX_ROWS} 张）图片。处理和导出操作依然会自动应用到全部 {total_images} 张图片。</b>"
+            self.stats_label.setHtml(current_html + trunc_msg)
     
     def preview_image(self, image_path: str):
         """预览图片"""
@@ -1258,6 +1419,7 @@ class ImageOrganizerDialog(QDialog):
                     f"\n\n优化统计:\n"
                     f"• 格式转换: {stats['format_converted']} 个\n"
                     f"• 分辨率调整: {stats['resized']} 个\n"
+                    f"• 跳过（小于阈值）: {stats.get('skipped_size', 0)} 个\n"
                     f"• 空间节省: {stats['size_reduction_mb']:.2f} MB\n"
                     f"• 压缩率: {stats['compression_ratio']:.2%}"
                 )

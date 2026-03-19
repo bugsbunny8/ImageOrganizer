@@ -246,7 +246,8 @@ class ImageProcessor:
             'resized': 0,
             'size_reduction': 0,  # 字节
             'original_total_size': 0,
-            'optimized_total_size': 0
+            'optimized_total_size': 0,
+            'skipped_size': 0
         }
     
     def process_images(self, cards: List[Dict], 
@@ -278,9 +279,15 @@ class ImageProcessor:
             resolution = self.config.get_resolution_preset(resolution_preset)
         else:
             resolution = (0, 0)
-        
+
+        # 获取最小文件大小限制（转换为字节）
+        min_size_bytes = self.config.compression.min_file_size_kb * 1024        
+
         # 生成文件名映射
         filename_map = self.generate_filename_map(cards, naming_pattern)
+        
+        # 已处理图片原始名称集合（映射: original_path -> new_name），防止同一文件被重复移动和报错
+        processed_original_paths = {}
         
         # 收集所有待处理的文件路径（去重）
         files_to_backup = set()
@@ -303,6 +310,18 @@ class ImageProcessor:
         for card in cards:
             for image_ref in card['images']:
                 try:
+                    if image_ref.original_path in processed_original_paths:
+                        new_name = processed_original_paths[image_ref.original_path]
+                        processed.append({
+                            'card_id': image_ref.card_id,
+                            'original': str(image_ref.original_path),
+                            'new': new_name,
+                            'action': 'reference_updated_globally',
+                            'size_reduction': 0,
+                            'optimized': False
+                        })
+                        continue
+
                     if not image_ref.file_exists:
                         errors.append({
                             'card_id': image_ref.card_id,
@@ -320,6 +339,22 @@ class ImageProcessor:
                         })
                         continue
                     
+                    # 获取文件大小
+                    file_size = original_path.stat().st_size
+                    # 检查文件大小是否满足处理条件
+                    if min_size_bytes > 0 and file_size < min_size_bytes:
+                        # 文件大小小于阈值，跳过处理
+                        processed.append({
+                            'card_id': image_ref.card_id,
+                            'original': str(original_path),
+                            'new': '',  # 保持原文件名
+                            'action': 'skipped_size',
+                            'size_reduction': 0,
+                            'optimized': False
+                        })
+                        self.stats['skipped_size'] += 1
+                        continue
+
                     # 更新统计
                     original_size = original_path.stat().st_size
                     self.stats['original_total_size'] += original_size
@@ -396,7 +431,10 @@ class ImageProcessor:
                     
                     # 更新卡片引用
                     if not dry_run:
-                        self.update_card_reference(card, image_ref, new_filename)
+                        self.update_card_reference(image_ref, new_filename)
+                        processed_original_paths[image_ref.original_path] = new_filename
+                    else:
+                        processed_original_paths[image_ref.original_path] = new_filename
                     
                 except Exception as e:
                     errors.append({
@@ -415,7 +453,8 @@ class ImageProcessor:
             'resized': 0,
             'size_reduction': 0,
             'original_total_size': 0,
-            'optimized_total_size': 0
+            'optimized_total_size': 0,
+            'skipped_size': 0  # 因文件大小过小跳过的数量
         }
     
     def _find_image_file(self, path_str: str) -> Optional[Path]:
@@ -582,51 +621,52 @@ class ImageProcessor:
             print(f"重命名文件时出错: {e}")
             return False
     
-    def update_card_reference(self, card: Dict, 
-                            image_ref: ImageReference, 
+    def update_card_reference(self, image_ref: ImageReference, 
                             new_filename: str) -> bool:
-        """更新卡片中的图片引用"""
+        """更新所有引用该图片的卡片/笔记"""
         from aqt import mw
+        import re
         
         try:
-            # 获取卡片
-            anki_card = mw.col.get_card(image_ref.card_id)
-            note = anki_card.note()
-            
-            # 查找字段
-            field_content = note.fields[image_ref.field_index]  # 使用图像对应的正确字段
-            
-            # 替换图片引用
             old_path = image_ref.original_path
             new_path = new_filename
             
-            # 使用正则表达式替换
-            import re
+            # 使用转义确保替换安全
             patterns = [
                 f'src="{re.escape(old_path)}"',
                 f"src='{re.escape(old_path)}'",
                 f'src="{re.escape(old_path.split("?")[0])}"',
             ]
             
-            updated = False
-            for pattern in patterns:
-                if re.search(pattern, field_content):
-                    field_content = re.sub(
-                        pattern, 
-                        f'src="{new_path}"', 
-                        field_content
-                    )
-                    updated = True
+            # 查找所有包含该文件名的笔记
+            search_query = f'"{old_path.split("?")[0]}"'
+            note_ids = mw.col.find_notes(search_query)
             
-            if updated:
-                note.fields[image_ref.field_index] = field_content
-                note.flush()
-                mw.col.update_note(note)
+            updated_any = False
+            for nid in note_ids:
+                note = mw.col.get_note(nid)
+                note_updated = False
+                
+                for i, field_content in enumerate(note.fields):
+                    for pattern in patterns:
+                        if re.search(pattern, field_content):
+                            field_content = re.sub(
+                                pattern, 
+                                f'src="{new_path}"', 
+                                field_content
+                            )
+                            note.fields[i] = field_content
+                            note_updated = True
+                
+                if note_updated:
+                    note.flush()
+                    mw.col.update_note(note)
+                    updated_any = True
             
-            return updated
+            return updated_any
             
         except Exception as e:
-            print(f"更新卡片引用时出错: {e}")
+            print(f"更新全局卡片引用时出错: {e}")
             return False
 
     def backup_files(self, files: Set[Path]) -> Optional[str]:
@@ -766,7 +806,8 @@ class ImageProcessor:
             'compression_ratio': (
                 self.stats['optimized_total_size'] / self.stats['original_total_size'] 
                 if self.stats['original_total_size'] > 0 else 1.0
-            )
+            ),
+            'skipped_size': self.stats.get('skipped_size', 0)
         }
     
     def install_pillow(self) -> bool:

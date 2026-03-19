@@ -39,7 +39,7 @@ from .settings_dialog import SettingsDialog
 
 # 插件配置
 ADDON_NAME = "Image Organizer Pro"
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 
 class ImageOrganizer:
     """图片整理插件主类 - 专业版"""

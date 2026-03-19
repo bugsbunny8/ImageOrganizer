@@ -11,7 +11,7 @@
   "max_cards_to_process": 10000,
   "timeout_seconds": 300,
   "scan_scope": {
-    "default_scope": "selected_cards",
+    "default_scope": "current_deck",
     "include_subdecks": true,
     "recent_searches": [],
     "recent_decks": []
@@ -19,7 +19,8 @@
   "compression": {
     "jpg_quality": 85,
     "enable_lossy_compression": true,
-    "min_compression_ratio": 0.9
+    "min_compression_ratio": 0.9,
+    "min_file_size_kb": 1024
   },
   "resolution": {
     "default_preset": "laptop",

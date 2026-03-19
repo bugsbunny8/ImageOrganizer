@@ -125,7 +125,15 @@ class SettingsDialog(QDialog):
         self.max_cards_spin.setValue(self.config.max_cards_to_process)
         self.max_cards_spin.setSpecialValueText("无限制")
         scanning_layout.addWidget(self.max_cards_spin)
-        
+
+        # 最小处理文件大小
+        scanning_layout.addWidget(QLabel("默认最小处理文件大小:"))
+        self.default_min_size_spin = QSpinBox()
+        self.default_min_size_spin.setRange(0, 102400)
+        self.default_min_size_spin.setValue(self.config.compression.min_file_size_kb)
+        self.default_min_size_spin.setSuffix(" KB")
+        scanning_layout.addWidget(self.default_min_size_spin)
+
         scanning_layout.addStretch()
         scanning_tab.setLayout(scanning_layout)
         
@@ -237,6 +245,7 @@ class SettingsDialog(QDialog):
         self.config.timeout_seconds = self.timeout_spin.value()
         self.config.skip_locked_cards = self.skip_locked_check.isChecked()
         self.config.scan_scope.max_history = self.history_max_spin.value()
+        self.config.compression.min_file_size_kb = self.default_min_size_spin.value()
         
         showInfo("设置已保存")
         self.accept()
