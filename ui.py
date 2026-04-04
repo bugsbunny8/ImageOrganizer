@@ -51,8 +51,10 @@ class ScanThread(QThread):
         
     def run(self):
         try:
+            start_time = time.time()
             cards = self.scanner.scan_scope(self.scan_scope)
             stats = self.scanner.get_statistics(cards)
+            stats['scan_time_seconds'] = time.time() - start_time
             self.finished_signal.emit(cards, stats)
         except Exception as e:
             self.error_signal.emit(str(e))
@@ -739,7 +741,7 @@ class ImageOrganizerDialog(QDialog):
         left_layout.addLayout(scan_layout)
         
         # 统计信息
-        stats_group = QGroupBox("扫描结果统计")
+        self.stats_group = QGroupBox("扫描结果统计")
         stats_layout = QVBoxLayout()
         
         self.stats_label = QTextBrowser()
@@ -748,8 +750,8 @@ class ImageOrganizerDialog(QDialog):
         self.stats_label.setMinimumHeight(200)
         
         stats_layout.addWidget(self.stats_label)
-        stats_group.setLayout(stats_layout)
-        left_layout.addWidget(stats_group)
+        self.stats_group.setLayout(stats_layout)
+        left_layout.addWidget(self.stats_group)
         
         # 牌组统计（使用滚动区域）
         deck_stats_group = QGroupBox("牌组统计")
@@ -1067,6 +1069,17 @@ class ImageOrganizerDialog(QDialog):
         
         # 格式化统计信息
         stats_text = self.format_stats_text(stats)
+        
+        if getattr(self, 'last_optimization_stats_html', None):
+            if hasattr(self, 'stats_group'):
+                self.stats_group.setTitle("优化结果统计")
+            stats_text = self.last_optimization_stats_html + "<br><br><hr><br><b>（自动刷新）当前卡片最新扫描状态:</b><br>" + stats_text
+            # 显示一次后清空，以备下次手动扫描还原
+            self.last_optimization_stats_html = None
+        else:
+            if hasattr(self, 'stats_group'):
+                self.stats_group.setTitle("扫描结果统计")
+                
         self.stats_label.setHtml(stats_text)
         
         # 显示牌组统计
@@ -1102,8 +1115,11 @@ class ImageOrganizerDialog(QDialog):
     
     def format_stats_text(self, stats: Dict) -> str:
         """格式化统计信息文本"""
+        scan_time = stats.get('scan_time_seconds', 0.0)
+        time_text = f"{scan_time:.2f} 秒" if scan_time > 0 else "未知"
+        
         text = (
-            f"<b>📊 扫描完成！</b><br>"
+            f"<b>📊 扫描完成！</b> (耗时: {time_text})<br>"
             f"<b>范围:</b> {self.scope_widget.get_scope_type()}<br>"
             f"<b>包含图片的卡片:</b> {stats['total_cards']} 张<br>"
             f"<b>图片引用总数:</b> {stats['total_images']} 个<br>"
@@ -1410,36 +1426,39 @@ class ImageOrganizerDialog(QDialog):
             )
             
             # 显示结果
-            result_text = f"处理完成！\n成功处理: {len(processed)} 个文件\n错误: {len(errors)} 个"
+            result_text = f"<b>处理（优化）完成！</b><br>成功处理: {len(processed)} 个文件<br>错误: {len(errors)} 个"
             
             # 显示优化统计
             if optimize_images:
                 stats = self.processor.get_optimization_stats()
                 optimization_text = (
-                    f"\n\n优化统计:\n"
-                    f"• 格式转换: {stats['format_converted']} 个\n"
-                    f"• 分辨率调整: {stats['resized']} 个\n"
-                    f"• 跳过（小于阈值）: {stats.get('skipped_size', 0)} 个\n"
-                    f"• 空间节省: {stats['size_reduction_mb']:.2f} MB\n"
-                    f"• 压缩率: {stats['compression_ratio']:.2%}"
+                    f"<br><br><b>最后一次优化专项统计:</b> (耗时: {stats.get('processing_time_seconds', 0.0):.2f} 秒)<br>"
+                    f"• 格式转换: <b>{stats['format_converted']}</b> 个<br>"
+                    f"• 分辨率调整: <b>{stats['resized']}</b> 个<br>"
+                    f"• 跳过（小于阈值）: <b>{stats.get('skipped_size', 0)}</b> 个<br>"
+                    f"• 帮您节省空间: <b style='color:green;'>{stats['size_reduction_mb']:.2f} MB</b><br>"
+                    f"• 平均压缩率: <b>{stats['compression_ratio']:.2%}</b>"
                 )
                 result_text += optimization_text
                 
-                # 更新优化统计标签
-                self.optimization_stats_label.setText(optimization_text)
-                self.optimization_stats_label.setVisible(True)
+                # 隐藏原先独立的优化结果小标签，因为现在我们要合并到大框里去
+                self.optimization_stats_label.setVisible(False)
             
             if errors:
-                error_details = "\n".join(
+                error_details = "<br>".join(
                     [f"卡片 {e['card_id']}: {e['error']}" 
                      for e in errors[:10]]
                 )
                 if len(errors) > 10:
-                    error_details += f"\n...还有 {len(errors) - 10} 个错误"
+                    error_details += f"<br>...还有 {len(errors) - 10} 个错误"
                 
-                showWarning(f"{result_text}\n\n错误详情:\n{error_details}")
+                result_text += f"<br><br><b style='color:red;'>部分错误详情:</b><br>{error_details}"
+                showWarning(f"处理已完成，但期间遇到少量错误！")
             else:
-                showInfo(result_text)
+                showInfo("所有选择的图片均已处理并优化完成！您节省了宝贵的空间。")
+            
+            # 记录本次优化结果文本，留待下方的自动扫描完成后与其合并显示
+            self.last_optimization_stats_html = result_text
             
             # 重新扫描以更新状态
             self.scan_cards()

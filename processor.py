@@ -268,6 +268,7 @@ class ImageProcessor:
         Returns:
             (processed_items, errors)
         """
+        start_time = time.time()
         processed = []
         errors = []
         
@@ -311,7 +312,11 @@ class ImageProcessor:
             for image_ref in card['images']:
                 try:
                     if image_ref.original_path in processed_original_paths:
+                        print("image_ref"+ image_ref.original_path + "already processed, update ref")
                         new_name = processed_original_paths[image_ref.original_path]
+                        # 图片已处理，只需更新当前卡片的引用
+                        if not dry_run:
+                            self.update_card_reference(image_ref, new_name)
                         processed.append({
                             'card_id': image_ref.card_id,
                             'original': str(image_ref.original_path),
@@ -332,6 +337,7 @@ class ImageProcessor:
                     
                     original_path = self._find_image_file(image_ref.original_path)
                     if not original_path:
+                        print("card_id:" + image_ref.card_id + "original_path:" + image_ref.original_path + "not found")
                         errors.append({
                             'card_id': image_ref.card_id,
                             'path': image_ref.original_path,
@@ -362,6 +368,8 @@ class ImageProcessor:
                     
                     # 优化图片
                     optimized_path = original_path
+                    # 提前缓存优化后大小，避免文件移动后再访问引发 FileNotFoundError
+                    cached_optimized_size = original_size
                     if optimize_images and self.optimizer:
                         # 检查是否需要优化
                         if self.optimizer.can_optimize(original_path):
@@ -377,12 +385,15 @@ class ImageProcessor:
                                 if resolution != (0, 0):
                                     self.stats['resized'] += 1
                                 
-                                # 更新大小统计
-                                optimized_size = optimized_path.stat().st_size
-                                size_reduction = original_size - optimized_size
+                                # 立即缓存优化后大小（文件移动前）
+                                try:
+                                    cached_optimized_size = optimized_path.stat().st_size
+                                except OSError:
+                                    cached_optimized_size = original_size
+                                size_reduction = original_size - cached_optimized_size
                                 if size_reduction > 0:
                                     self.stats['size_reduction'] += size_reduction
-                                    self.stats['optimized_total_size'] += optimized_size
+                                    self.stats['optimized_total_size'] += cached_optimized_size
                     
                     # 生成新文件名
                     new_filename = self.generate_new_filename(
@@ -400,7 +411,7 @@ class ImageProcessor:
                             'original': str(original_path),
                             'new': new_filename,
                             'action': 'reference_updated',
-                            'size_reduction': original_size - optimized_path.stat().st_size,
+                            'size_reduction': original_size - cached_optimized_size,
                             'optimized': optimized_path != original_path
                         })
                         
@@ -425,7 +436,7 @@ class ImageProcessor:
                             'original': str(original_path),
                             'new': str(new_path),
                             'action': 'file_optimized_and_renamed',
-                            'size_reduction': original_size - optimized_path.stat().st_size,
+                            'size_reduction': original_size - cached_optimized_size,
                             'optimized': optimized_path != original_path
                         })
                     
@@ -433,6 +444,14 @@ class ImageProcessor:
                     if not dry_run:
                         self.update_card_reference(image_ref, new_filename)
                         processed_original_paths[image_ref.original_path] = new_filename
+                        
+                        # 在所有图片引用更新完成后，删除原始图片文件
+                        if original_path.exists() and str(original_path.resolve()) != str(new_path.resolve()):
+                            try:
+                                original_path.unlink(missing_ok=True)
+                            except Exception as e:
+                                print(f"清理原始源文件失败 {original_path}: {e}")
+                                
                     else:
                         processed_original_paths[image_ref.original_path] = new_filename
                     
@@ -443,6 +462,7 @@ class ImageProcessor:
                         'error': str(e)
                     })
         
+        self.stats['processing_time_seconds'] = time.time() - start_time
         return processed, errors
     
     def _reset_stats(self):
@@ -640,6 +660,7 @@ class ImageProcessor:
             
             # 查找所有包含该文件名的笔记
             search_query = f'"{old_path.split("?")[0]}"'
+            print(search_query)
             note_ids = mw.col.find_notes(search_query)
             
             updated_any = False
@@ -650,16 +671,17 @@ class ImageProcessor:
                 for i, field_content in enumerate(note.fields):
                     for pattern in patterns:
                         if re.search(pattern, field_content):
+                            print("search card:" + field_content)
                             field_content = re.sub(
                                 pattern, 
                                 f'src="{new_path}"', 
                                 field_content
                             )
+                            print("->：" + field_content)
                             note.fields[i] = field_content
                             note_updated = True
                 
                 if note_updated:
-                    note.flush()
                     mw.col.update_note(note)
                     updated_any = True
             
@@ -807,7 +829,8 @@ class ImageProcessor:
                 self.stats['optimized_total_size'] / self.stats['original_total_size'] 
                 if self.stats['original_total_size'] > 0 else 1.0
             ),
-            'skipped_size': self.stats.get('skipped_size', 0)
+            'skipped_size': self.stats.get('skipped_size', 0),
+            'processing_time_seconds': self.stats.get('processing_time_seconds', 0.0)
         }
     
     def install_pillow(self) -> bool:
