@@ -1,63 +1,137 @@
-# Anki Image Organizer Pro
+# Image Organizer Pro for Anki
 
-## 📖 简介
-Anki Image Organizer Pro 是一个功能强大的Anki插件，专门用于整理、优化和管理Anki卡片中的图片资源。它能够显著减少存储空间占用，提高Anki性能，并提供灵活的图片管理功能。
+[![Anki Version](https://img.shields.io/badge/Anki-2.1.45%20--%202.1.50+-blue.svg)](https://apps.ankiweb.net/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Python](https://img.shields.io/badge/Python-3.7+-blue.svg)](https://www.python.org/)
 
-## ✨ 核心功能
+**Image Organizer Pro** is a powerful, professional, and feature-rich Anki add-on designed to manage, clean up, and optimize image resources within your Anki decks. By converting formats, resizing resolutions, and removing duplicate media files, it can reduce your media storage folder size by **70% to 90%**.
 
-### 🎯 智能图片整理
-- **统一文件名格式**：支持哈希、时间戳、序列号等多种命名模式。
-- **智能去重与多卡同源处理**：基于文件内容哈希值，自动识别和合并重复图片；优化了多张卡片引用同一图片的并发处理逻辑，确保稳定不报错。
-- **引用更新**：自动更新卡片中的图片引用，确保链接正确。
+This plugin improves card loading speeds, sync times (with AnkiWeb or self-hosted servers), and optimizes mobile device storage—making it an essential tool for media-heavy decks such as Medical School (AnKing), Languages, Anatomy, and Geography.
 
-### 🖼️ 高级图片优化
-- **格式转换**：自动将PNG、WebP等无损格式转换为JPG，节省70-90%存储空间。
-- **分辨率调整**：提供手机、笔记本、1080p、2K、4K等多种预设分辨率。
-- **智能小图过滤**：支持自定义最小处理文件大小（例如默认 1MB），小图将直接跳过不作压缩以加快速度并防止画质降级。
-- **批量预估**：处理前预估空间节省效果并在面板直观呈现。
+---
 
-### 📊 动态交互与统计
-- **自适应界面**：插件弹窗大小会基于您当前的桌面分辨率动态调整，适应不同系统的展示需求。
-- **专属优化统计面板**：扫描与处理完成后，面板直接变更为“优化结果统计”，详细展示：格式转换数、整体压缩率、缩减的图片体积等深度数据。
+## 🚀 Key Features
 
-### 🔍 灵活范围选择
-- **所有卡片**：处理整个Anki数据库
-- **当前牌组**：仅处理当前选中的牌组（包括子牌组）
-- **指定牌组**：从牌组树中选择一个或多个牌组
-- **选中卡片**：处理卡片浏览器中选中的卡片
-- **自定义搜索**：使用Anki搜索语法自定义处理范围
+### 1. Smart Image Reorganization
 
-### 🛡️ 安全处理机制
-- **试运行模式**：预览处理效果而不实际修改文件
-- **自动备份**：处理前自动备份媒体文件夹
-- **错误恢复**：详细的错误日志和恢复选项
-- **分批处理**：支持大型数据集的分批处理
+* **Unified File Naming**: Automatically rename all images using standard naming conventions (MD5 hash, timestamps, sequential numbering, or custom file templates).
+* **Deduplication & Multi-Card Referencing**: Scans all card fields, identifies identical images by file hash, and merges references. It handles concurrent references cleanly to prevent broken images or database errors.
+* **Automatic Reference Updates**: Automatically rewrites HTML `<img>` tags in your cards to update image sources, ensuring card layouts remain intact.
 
-## 📦 安装指南
+### 2. Advanced Image Optimization & Compression
 
-### 系统要求
-- Anki版本: 2.1.45 或更高
-- Python: 3.7+ (Anki自带)
-- 操作系统: Windows 10+, macOS 10.14+, Linux
+* **Smart Format Conversion**: Convert space-consuming, lossless formats (PNG, BMP, TIFF, WebP, HEIC/HEIF) to highly compressed JPG files to save substantial storage space.
+* **Resolution Resizing**: Downscale oversized high-res screenshots to target device presets. Includes built-in presets:
+  * `mobile` (720x1280) - Optimized for smartphones
+  * `tablet` (1080x1920) - Optimized for tablets
+  * `laptop` (1366x768) - Optimized for laptops
+  * `1080p` (1920x1080) - Full HD
+  * `1440p` (2560x1440) - 2K
+  * `4k` (3840x2160) - 4K Ultra HD
+  * `original` - Retain original resolution
+* **Small-Image Filtering**: Define a size threshold (e.g., skip files smaller than 1MB). This ensures tiny icons, emojis, or small diagrams aren't needlessly compressed or degraded.
+* **Space Savings Preview**: Estimates potential storage savings on-screen in real-time before applying any changes to your files.
 
-### 安装步骤
+### 3. Granular Range & Scope Selection
 
-#### 方法一：手动安装（推荐）
-1. 下载插件压缩包并解压
-2. 在Anki的addons目录下创建文件夹：`anki_image_organizer_pro`
-3. 将所有文件复制到该文件夹
-4. 确保包含 `manifest.json` 文件
-5. 重启Anki
+Process exactly what you need. Choose your scope via a simple radio-button interface:
 
-#### 方法二：从AnkiWeb安装（待发布）
-1. 打开Anki
-2. 菜单栏: 工具 → 附加组件 → 获取附加组件
-3. 输入插件代码: `待发布`
-4. 点击确定安装
+* **All Cards**: Scans and optimizes the entire Anki collection.
+* **Current Deck**: Processes the currently selected deck (including or excluding subdecks).
+* **Specified Decks**: Multi-select custom decks from an interactive deck tree.
+* **Selected Cards**: Process only cards selected in the Anki Card Browser.
+* **Custom Search Queries**: Run custom scans using Anki's standard search query syntax (e.g. `added:7` for recent cards, or `tag:large_image`).
 
-### 安装依赖
-首次运行时，如果缺少Pillow库，插件会提示安装：
-```bash
-# 手动安装命令
-pip install Pillow
-```
+### 4. Interactive UI & Deep Analytics
+
+* **Adaptive Layout**: The user interface is dynamically sized based on your monitor's screen resolution to fit both high-DPI displays and small laptop screens.
+* **Post-Process Statistics Dashboard**: Replaces the progress panel after optimization is completed to display clear metrics: total files processed, formats converted, compression ratios, and total megabytes saved.
+
+### 5. Multi-Level Safety Mechanisms
+
+* **Dry Run Mode**: Scans your deck and simulates the organization process so you can preview changes without modifying files or the database.
+* **Automated Media Backup**: Automatically backs up files to a designated folder (`anki_image_backups`) before executing modifications.
+* **Failure Recovery**: Restores files easily from auto-backups if error conditions are detected.
+* **Safe Batching**: Processes files in configurable batch sizes to prevent database locking, app freezes, or memory leaks.
+
+---
+
+## 🛠️ Integration with Anki
+
+Image Organizer Pro integrates seamlessly with the Anki environment:
+
+1. **Main Menu**: Accessible via **Tools** → **Image Organizer Pro**. Includes submenus for opening the main interface, launching Quick Processes directly, or accessing Settings.
+2. **Browser Context Menu**: Open the Anki Browser, select your cards, right-click, and select **🖼️ Process selected cards' images (Pro)...** to quickly target specific notes.
+3. **Editor Toolbar**: Adds a **🖼️↑** button to the Anki note editor toolbar (Add Card / Edit Card dialogs) for single-note, on-the-fly optimization.
+
+---
+
+## ⚙️ Configuration & Customization
+
+The add-on offers customizable settings accessible via the **Settings** dialog or by editing the `config.json` file. Below are the key configuration parameters:
+
+| Parameter Key | Type | Default Value | Description |
+|---|---|---|---|
+| `target_format` | String | `"jpg"` | Target format for image conversion (`"jpg"`, `"webp"`, or `"png"`). |
+| `auto_backup` | Boolean | `true` | Enable/disable auto-backup of image files before processing. |
+| `backup_folder` | String | `"anki_image_backups"` | Name of the backup folder inside the add-on folder structure. |
+| `optimization_strategy` | String | `"balanced"` | Optimization speed/quality strategy (`"minimal"`, `"balanced"`, `"aggressive"`). |
+| `skip_locked_cards` | Boolean | `true` | Skip cards that are locked by Anki. |
+| `compression.jpg_quality` | Integer | `85` | Quality level for JPG compression (1 to 100). |
+| `compression.min_file_size_kb` | Integer | `1024` | Skip files smaller than this size (in KB) to protect small images. |
+| `resolution.default_preset` | String | `"laptop"` | Default resolution profile to apply. |
+| `resolution.keep_aspect_ratio` | Boolean | `true` | Retain image proportions when resizing. |
+| `resolution.resize_mode` | String | `"contain"` | Scaling mode: `"contain"`, `"cover"`, or `"fill"`. |
+
+---
+
+## 📦 Installation Guide
+
+### System Requirements
+
+* **Anki Version**: 2.1.45 or higher (up to 2.1.50+ and Qt6)
+* **Python**: 3.7+ (Bundled with Anki)
+* **Operating System**: Windows 10/11, macOS 10.14+, Linux
+
+### Setup Instructions
+
+#### Method 1: Manual Installation (Recommended)
+
+1. Download the repository ZIP archive and extract it.
+2. Locate Anki's add-on directory on your computer:
+    * **Windows**: `%APPDATA%\Anki2\addons21`
+    * **macOS**: `~/Library/Application Support/Anki2/addons21`
+    * **Linux**: `~/.local/share/Anki2/addons21`
+3. Create a folder named `anki_image_organizer_pro` under the `addons21` directory.
+4. Copy all files from the extracted directory into the newly created folder.
+5. Restart Anki.
+
+#### Method 2: From AnkiWeb (Pending Release)
+
+1. In Anki, go to **Tools** → **Add-ons**.
+2. Click **Get Add-ons...** on the right side.
+3. Enter the code: `[Pending Release]` and click **OK**.
+4. Restart Anki.
+
+### Library Dependencies
+
+This add-on requires the Python **Pillow** (PIL) library for format conversion and image resizing.
+
+* **Automatic Installation**: On startup, if Pillow is missing, the add-on will prompt you to install it automatically.
+* **Manual Installation**: If the auto-installer fails, you can run the following command in your system shell or virtual environment:
+
+    ```bash
+    pip install Pillow
+    ```
+
+---
+
+## 🛡️ License
+
+This project is licensed under the **MIT License** - see the LICENSE file for details.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to open Issues or submit Pull Requests on the official [GitHub Repository](https://github.com/bugsbunny8/anki-image-organizer).
