@@ -312,7 +312,7 @@ class ImageProcessor:
             for image_ref in card['images']:
                 try:
                     if image_ref.original_path in processed_original_paths:
-                        print("image_ref"+ image_ref.original_path + "already processed, update ref")
+                        #print("image_ref"+ image_ref.original_path + "already processed, update ref")
                         new_name = processed_original_paths[image_ref.original_path]
                         # 图片已处理，只需更新当前卡片的引用
                         if not dry_run:
@@ -337,7 +337,7 @@ class ImageProcessor:
                     
                     original_path = self._find_image_file(image_ref.original_path)
                     if not original_path:
-                        print("card_id:" + image_ref.card_id + "original_path:" + image_ref.original_path + "not found")
+                        #print("card_id:" + image_ref.card_id + "original_path:" + image_ref.original_path + "not found")
                         errors.append({
                             'card_id': image_ref.card_id,
                             'path': image_ref.original_path,
@@ -660,7 +660,7 @@ class ImageProcessor:
             
             # 查找所有包含该文件名的笔记
             search_query = f'"{old_path.split("?")[0]}"'
-            print(search_query)
+            #(search_query)
             note_ids = mw.col.find_notes(search_query)
             
             updated_any = False
@@ -671,13 +671,13 @@ class ImageProcessor:
                 for i, field_content in enumerate(note.fields):
                     for pattern in patterns:
                         if re.search(pattern, field_content):
-                            print("search card:" + field_content)
+                            #print("search card:" + field_content)
                             field_content = re.sub(
                                 pattern, 
                                 f'src="{new_path}"', 
                                 field_content
                             )
-                            print("->：" + field_content)
+                            #print("->：" + field_content)
                             note.fields[i] = field_content
                             note_updated = True
                 

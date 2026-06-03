@@ -283,70 +283,143 @@ def init_addon():
 hooks.addHook("profileLoaded", init_addon)
 
 # 添加浏览器上下文菜单
+def process_browser_selected(browser):
+    """处理选中卡片处理函数"""
+    from aqt.utils import showWarning
+    from .ui import ScanScopeWidget, ImageOrganizerDialog
+    
+    if img_organizer:
+        # 获取选中卡片
+        card_ids = browser.selectedCards()
+        
+        if not card_ids:
+            showWarning("请先在卡片浏览器中选择卡片")
+            return
+        
+        # 扫描选中卡片
+        cards = img_organizer.scanner.scan_selected_cards(card_ids)
+        
+        if not cards:
+            showWarning("选中的卡片中没有包含图片的卡片")
+            return
+        
+        # 显示处理对话框
+        dialog = ImageOrganizerDialog(img_organizer, browser)
+        
+        # 设置范围为选中卡片
+        dialog.scope_widget.selected_cards_radio.setChecked(True)
+        dialog.scope_widget.update_ui_state()
+        
+        # 预扫描
+        dialog.cards = cards
+        dialog.scanned = True
+        
+        # 更新统计
+        stats = img_organizer.scanner.get_statistics(cards)
+        dialog.stats_label.setText(
+            f"选中的卡片: {len(card_ids)} 张\n"
+            f"包含图片的卡片: {stats['total_cards']} 张\n"
+            f"图片总数: {stats['total_images']} 个"
+        )
+        
+        # 更新表格
+        dialog.update_results_table_with_estimates()
+        
+        # 启用处理按钮
+        dialog.process_button.setEnabled(True)
+        dialog.export_button.setEnabled(True)
+        
+        dialog.exec()
+
 def setup_browser_menu(browser):
     """设置浏览器上下文菜单"""
     from aqt.qt import QAction
-    from aqt.utils import showWarning
     
     menu = browser.form.menuEdit
     if menu:
         # 添加分隔符
         menu.addSeparator()
         
-        # 添加处理选中卡片菜单项
-        def process_selected():
-            if img_organizer:
-                # 获取选中卡片
-                card_ids = browser.selectedCards()
-                
-                if not card_ids:
-                    showWarning("请先在卡片浏览器中选择卡片")
-                    return
-                
-                # 扫描选中卡片
-                cards = img_organizer.scanner.scan_selected_cards(card_ids)
-                
-                if not cards:
-                    showWarning("选中的卡片中没有包含图片的卡片")
-                    return
-                
-                # 显示处理对话框
-                dialog = ImageOrganizerDialog(img_organizer, browser)
-                
-                # 设置范围为选中卡片
-                from .ui import ScanScopeWidget
-                dialog.scope_widget.selected_cards_radio.setChecked(True)
-                dialog.scope_widget.update_ui_state()
-                
-                # 预扫描
-                dialog.cards = cards
-                dialog.scanned = True
-                
-                # 更新统计
-                stats = img_organizer.scanner.get_statistics(cards)
-                dialog.stats_label.setText(
-                    f"选中的卡片: {len(card_ids)} 张\n"
-                    f"包含图片的卡片: {stats['total_cards']} 张\n"
-                    f"图片总数: {stats['total_images']} 个"
-                )
-                
-                # 更新表格
-                dialog.update_results_table()
-                
-                # 启用处理按钮
-                dialog.process_button.setEnabled(True)
-                dialog.export_button.setEnabled(True)
-                
-                dialog.exec()
-        
         action = QAction("处理选中卡片的图片", browser)
-        action.triggered.connect(process_selected)
+        action.triggered.connect(lambda: process_browser_selected(browser))
         menu.addAction(action)
+
+def setup_browser_context_menu(browser, menu):
+    """设置浏览器右键上下文菜单"""
+    from aqt.qt import QAction
+    menu.addSeparator()
+    action = QAction("🖼️ 处理选中卡片的图片(Pro)...", browser)
+    action.triggered.connect(lambda: process_browser_selected(browser))
+    menu.addAction(action)
+
+def setup_editor_buttons(buttons, editor):
+    """在编辑器（添加、编辑、浏览器下方面板）添加单次处理按钮"""
+    if not img_organizer:
+        return
+        
+    def on_editor_optimize_clicked(ed=editor):
+        if not ed.note:
+            return
+        # 保存当前输入
+        ed.saveNow(lambda: process_editor_note(ed))
+
+    btn = editor.addButton(
+        icon=None,
+        cmd="img_organizer_process",
+        func=on_editor_optimize_clicked,
+        tip="优化图片 - 使用 Image Organizer 优化本单张卡片的图片",
+        #keys="Ctrl+Shift+m",
+        label="🖼️↑"
+    )
+    buttons.append(btn)
+
+def process_editor_note(editor):
+    """处理当前编辑器内的单张卡片（笔记）"""
+    from aqt.utils import showInfo
+    note = editor.note
+    if not note:
+        return
+        
+    card_ids = [c.id for c in note.cards()]
+    if not card_ids:
+        showInfo("当前笔记尚未生成卡片，请保存后再试。")
+        return
+        
+    cards = img_organizer.scanner.scan_selected_cards(card_ids)
+    if not cards:
+        showInfo("当前笔记没有包含可处理的图片。")
+        return
+        
+    dialog = ImageOrganizerDialog(img_organizer, editor.parentWindow)
+    from .ui import ScanScopeWidget
+    dialog.scope_widget.selected_cards_radio.setChecked(True)
+    dialog.scope_widget.update_ui_state()
+    
+    dialog.cards = cards
+    dialog.scanned = True
+    
+    stats = img_organizer.scanner.get_statistics(cards)
+    dialog.stats_label.setText(
+        f"当前笔记包含的卡片: {len(card_ids)} 张\n"
+        f"包含图片的卡片: {stats['total_cards']} 张\n"
+        f"图片总数: {stats['total_images']} 个"
+    )
+    
+    dialog.update_results_table_with_estimates()
+    dialog.process_button.setEnabled(True)
+    dialog.export_button.setEnabled(True)
+    
+    dialog.exec()
+    
+    # 强制重新加载以显示新图片（如果重新命名）
+    editor.loadNote()
 
 # 注册浏览器菜单
 try:
     from aqt import gui_hooks
     gui_hooks.browser_menus_did_init.append(setup_browser_menu)
+    gui_hooks.browser_will_show_context_menu.append(setup_browser_context_menu)
+    gui_hooks.editor_did_init_buttons.append(setup_editor_buttons)
 except ImportError:
     # 旧版Anki兼容
     pass
